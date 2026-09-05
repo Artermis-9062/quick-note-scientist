@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 1. Dependencies (NEVER commit this, it is massive and gets rebuilt locally)
+node_modules/
+
+# 2. Production Build Output (Generated automatically, no need to save)
+dist/
+dist-ssr/
+
+# 3. Environment Variables (CRITICAL: This protects your passwords)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 4. OS/System Files (Keeps your repo clean from hidden system clutter)
+.DS_Store
+Thumbs.db
+
+# 5. Editor/IDE Data (Optional, but good practice so your local settings don't override others)
+.vscode/*
+!.vscode/extensions.json
+.idea/
