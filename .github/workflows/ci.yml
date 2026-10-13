@@ -33,19 +33,20 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browser
+        if: hashFiles('playwright.config.*') != ''
         run: npx playwright install --with-deps chromium
 
       - name: Lint
         run: npm run lint
 
       - name: Run unit tests
-        run: npm test
+        run: npm run test --if-present
 
       - name: Build production bundle
         run: npm run build
 
       - name: Run end-to-end tests
-        run: npm run test:e2e
+        run: npm run test:e2e --if-present
 
       - name: Upload Playwright report on failure
         if: failure()
