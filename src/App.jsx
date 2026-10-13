@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -9,8 +9,8 @@ import { translateMath, toLatex, mapCaret } from './utils/mathTranslator.js';
 // Preprocessor for custom shortcut
 const preprocessMarkdown = (text) => {
   // Replace /start, \start, /end, \end with $$
-  let processed = text.replace(/[\/\\]start/g, '$$$$');
-  processed = processed.replace(/[\/\\]end/g, '$$$$');
+  let processed = text.replace(/[/\\]start/g, '$$$$');
+  processed = processed.replace(/[/\\]end/g, '$$$$');
   return processed;
 };
 
@@ -63,6 +63,8 @@ const DEFAULT_SETTINGS = {
   autoPurgeDays: 30,
 };
 
+const getCurrentTime = () => Date.now();
+
 function App() {
   const [view, setView] = useState('home'); // 'home', 'editor', 'notes', 'deleted', or 'settings'
   const [noteTitle, setNoteTitle] = useState('');
@@ -77,6 +79,7 @@ function App() {
   useEffect(() => {
     const savedNotes = localStorage.getItem('scientist-notes');
     if (savedNotes) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setNotes(JSON.parse(savedNotes));
     }
     const savedDeleted = localStorage.getItem('scientist-deleted-notes');
@@ -94,12 +97,13 @@ function App() {
     if (settings.autoPurgeDays === 0 || deletedNotes.length === 0) return;
 
     const purgeThreshold = settings.autoPurgeDays * 86400000; // days to ms
-    const now = Date.now();
+    const now = getCurrentTime();
     const remaining = deletedNotes.filter(
       (note) => now - note.deletedAt < purgeThreshold
     );
 
     if (remaining.length < deletedNotes.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeletedNotes(remaining);
       localStorage.setItem('scientist-deleted-notes', JSON.stringify(remaining));
     }
@@ -160,15 +164,15 @@ function App() {
     if (activeNoteId) {
       // Update existing note
       updatedNotes = notes.map(n => 
-        n.id === activeNoteId ? { ...n, title: titleToSave, content: noteContent, updatedAt: Date.now() } : n
+        n.id === activeNoteId ? { ...n, title: titleToSave, content: noteContent, updatedAt: getCurrentTime() } : n
       );
     } else {
       // Create new note
       const newNote = {
-        id: Date.now().toString(),
+        id: getCurrentTime().toString(),
         title: titleToSave,
         content: noteContent,
-        updatedAt: Date.now()
+        updatedAt: getCurrentTime()
       };
       updatedNotes = [...notes, newNote];
       setActiveNoteId(newNote.id);
@@ -198,7 +202,7 @@ function App() {
     localStorage.setItem('scientist-notes', JSON.stringify(updatedNotes));
 
     // Add to deleted notes with a deletedAt timestamp
-    const deletedNote = { ...noteToDelete, deletedAt: Date.now() };
+    const deletedNote = { ...noteToDelete, deletedAt: getCurrentTime() };
     const updatedDeleted = [...deletedNotes, deletedNote];
     setDeletedNotes(updatedDeleted);
     localStorage.setItem('scientist-deleted-notes', JSON.stringify(updatedDeleted));
@@ -222,7 +226,8 @@ function App() {
     localStorage.setItem('scientist-deleted-notes', JSON.stringify(updatedDeleted));
 
     // Add back to active notes (remove deletedAt property)
-    const { deletedAt, ...restoredNote } = noteToRestore;
+    const restoredNote = { ...noteToRestore };
+    delete restoredNote.deletedAt;
     const updatedNotes = [...notes, restoredNote];
     setNotes(updatedNotes);
     localStorage.setItem('scientist-notes', JSON.stringify(updatedNotes));
@@ -240,7 +245,7 @@ function App() {
       return { text: 'Kept forever', expiringSoon: false };
     }
     const expiresAt = deletedAt + settings.autoPurgeDays * 86400000;
-    const remainingMs = expiresAt - Date.now();
+    const remainingMs = expiresAt - getCurrentTime();
     const expiringSoon = remainingMs < 86400000; // less than 1 day
     return {
       text: `Auto-deletes ${timeRemaining(remainingMs)}`,
