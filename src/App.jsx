@@ -5,6 +5,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import './index.css';
 import { translateMath, toLatex, mapCaret } from './utils/mathTranslator.js';
+import { useNoteStorage } from './storage/useNoteStorage.js';
 
 // Preprocessor for custom shortcut
 const preprocessMarkdown = (text) => {
@@ -59,10 +60,6 @@ const PURGE_OPTIONS = [
   { value: 90, label: 'After 90 days' },
 ];
 
-const DEFAULT_SETTINGS = {
-  autoPurgeDays: 30,
-};
-
 const getCurrentTime = () => Date.now();
 
 function App() {
@@ -70,44 +67,21 @@ function App() {
   const [noteTitle, setNoteTitle] = useState('');
   const editorRef = useRef(null);
   const [noteContent, setNoteContent] = useState('');
-  const [notes, setNotes] = useState([]);
   const [activeNoteId, setActiveNoteId] = useState(null);
-  const [deletedNotes, setDeletedNotes] = useState([]);
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  // All persisted collections share one snapshot; editor fields remain independent.
+  const { snapshot, blocked, error, commitSnapshot, retryLoad } = useNoteStorage();
+  const { notes, deletedNotes, settings } = snapshot;
 
-  // Load notes and settings from local storage on mount
+  // Purge only validated data, and retain expired notes if persistence fails.
   useEffect(() => {
-    const savedNotes = localStorage.getItem('scientist-notes');
-    if (savedNotes) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNotes(JSON.parse(savedNotes));
-    }
-    const savedDeleted = localStorage.getItem('scientist-deleted-notes');
-    if (savedDeleted) {
-      setDeletedNotes(JSON.parse(savedDeleted));
-    }
-    const savedSettings = localStorage.getItem('scientist-settings');
-    if (savedSettings) {
-      setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
-    }
-  }, []);
-
-  // Auto-purge expired deleted notes
-  useEffect(() => {
-    if (settings.autoPurgeDays === 0 || deletedNotes.length === 0) return;
-
-    const purgeThreshold = settings.autoPurgeDays * 86400000; // days to ms
+    if (blocked || settings.autoPurgeDays === 0 || deletedNotes.length === 0) return;
+    const purgeThreshold = settings.autoPurgeDays * 86400000;
     const now = getCurrentTime();
-    const remaining = deletedNotes.filter(
-      (note) => now - note.deletedAt < purgeThreshold
-    );
-
+    const remaining = deletedNotes.filter(note => now - note.deletedAt < purgeThreshold);
     if (remaining.length < deletedNotes.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDeletedNotes(remaining);
-      localStorage.setItem('scientist-deleted-notes', JSON.stringify(remaining));
+      commitSnapshot({ ...snapshot, deletedNotes: remaining });
     }
-  }, [deletedNotes, settings.autoPurgeDays]);
+  }, [snapshot, blocked, deletedNotes, settings.autoPurgeDays, commitSnapshot]);
 
   // Caret tracking across in-place translations from the symbol translator.
   // `pendingCaret` holds the caret offset in the *original* (pre-translation)
@@ -134,17 +108,16 @@ function App() {
   // --- Settings Handlers ---
 
   const handleSettingsChange = (key, value) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
-    localStorage.setItem('scientist-settings', JSON.stringify(updated));
+    // Commit settings with both note collections so a failed write leaves UI settings intact.
+    commitSnapshot({ ...snapshot, settings: { ...settings, [key]: value } });
   };
 
   const handleClearAllTrash = () => {
     if (!window.confirm('Are you sure you want to permanently delete all trashed notes? This cannot be undone.')) {
       return;
     }
-    setDeletedNotes([]);
-    localStorage.setItem('scientist-deleted-notes', JSON.stringify([]));
+    // Empty trash only after the complete snapshot has been saved.
+    commitSnapshot({ ...snapshot, deletedNotes: [] });
   };
 
   // --- Note Handlers ---
@@ -157,10 +130,12 @@ function App() {
   };
 
   const handleSaveNote = () => {
-    if (!noteTitle.trim() && !noteContent.trim()) return;
+    // Protect corrupt storage even if this handler is invoked outside its disabled button.
+    if (blocked || (!noteTitle.trim() && !noteContent.trim())) return;
 
     const titleToSave = noteTitle.trim() || 'Untitled Note';
     let updatedNotes;
+    let savedId = activeNoteId;
     if (activeNoteId) {
       // Update existing note
       updatedNotes = notes.map(n => 
@@ -175,12 +150,14 @@ function App() {
         updatedAt: getCurrentTime()
       };
       updatedNotes = [...notes, newNote];
-      setActiveNoteId(newNote.id);
+      savedId = newNote.id;
     }
 
-    setNotes(updatedNotes);
-    localStorage.setItem('scientist-notes', JSON.stringify(updatedNotes));
-    alert('Note saved to your storage!');
+    // A failed save keeps editor text and identity, allowing a safe retry.
+    if (commitSnapshot({ ...snapshot, notes: updatedNotes })) {
+      setActiveNoteId(savedId);
+      alert('Note saved to your storage!');
+    }
   };
 
   const handleOpenNote = (note) => {
@@ -196,16 +173,13 @@ function App() {
     const noteToDelete = notes.find(n => n.id === noteId);
     if (!noteToDelete) return;
 
-    // Remove from active notes
-    const updatedNotes = notes.filter(n => n.id !== noteId);
-    setNotes(updatedNotes);
-    localStorage.setItem('scientist-notes', JSON.stringify(updatedNotes));
-
-    // Add to deleted notes with a deletedAt timestamp
-    const deletedNote = { ...noteToDelete, deletedAt: getCurrentTime() };
-    const updatedDeleted = [...deletedNotes, deletedNote];
-    setDeletedNotes(updatedDeleted);
-    localStorage.setItem('scientist-deleted-notes', JSON.stringify(updatedDeleted));
+    // Move the note in one write; failure leaves it active and keeps the editor open.
+    const next = {
+      ...snapshot,
+      notes: notes.filter(n => n.id !== noteId),
+      deletedNotes: [...deletedNotes, { ...noteToDelete, deletedAt: getCurrentTime() }],
+    };
+    if (!commitSnapshot(next)) return;
 
     // If this note was open in the editor, go back home
     if (activeNoteId === noteId) {
@@ -220,23 +194,19 @@ function App() {
     const noteToRestore = deletedNotes.find(n => n.id === noteId);
     if (!noteToRestore) return;
 
-    // Remove from deleted
-    const updatedDeleted = deletedNotes.filter(n => n.id !== noteId);
-    setDeletedNotes(updatedDeleted);
-    localStorage.setItem('scientist-deleted-notes', JSON.stringify(updatedDeleted));
-
-    // Add back to active notes (remove deletedAt property)
+    // Copy before removing trash metadata; never mutate the current snapshot.
     const restoredNote = { ...noteToRestore };
     delete restoredNote.deletedAt;
-    const updatedNotes = [...notes, restoredNote];
-    setNotes(updatedNotes);
-    localStorage.setItem('scientist-notes', JSON.stringify(updatedNotes));
+    commitSnapshot({
+      ...snapshot,
+      notes: [...notes, restoredNote],
+      deletedNotes: deletedNotes.filter(n => n.id !== noteId),
+    });
   };
 
   const handlePermanentDelete = (noteId) => {
-    const updatedDeleted = deletedNotes.filter(n => n.id !== noteId);
-    setDeletedNotes(updatedDeleted);
-    localStorage.setItem('scientist-deleted-notes', JSON.stringify(updatedDeleted));
+    // Keep the trash record visible if its permanent removal cannot be persisted.
+    commitSnapshot({ ...snapshot, deletedNotes: deletedNotes.filter(n => n.id !== noteId) });
   };
 
   // --- Countdown Helper ---
@@ -296,6 +266,13 @@ function App() {
 
       {/* Main Content Area */}
       <main className="main-content">
+        {/* Explain failures to screen readers and allow a read-only recovery retry. */}
+        {error && (
+          <div role="alert" style={{ padding: '1rem' }}>
+            <p>{error}</p>
+            {blocked && <button className="primary-button" onClick={retryLoad}>Retry loading saved data</button>}
+          </div>
+        )}
         <header className="main-header">
           <h1>Notes for Scientist</h1>
           <p className="subtitle">Your dedicated space for research and discovery.</p>
@@ -369,6 +346,7 @@ function App() {
                         <button
                           className="delete-icon-button"
                           title="Delete note"
+                          disabled={blocked}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteNote(note.id);
@@ -414,13 +392,14 @@ function App() {
                   <button
                     className="delete-icon-button"
                     title="Delete this note"
+                    disabled={blocked}
                     onClick={() => handleDeleteNote(activeNoteId)}
                     style={{ padding: '0.5rem 0.6rem', fontSize: '1.1rem' }}
                   >
                     🗑️
                   </button>
                 )}
-                <button className="primary-button" onClick={handleSaveNote} style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}>
+                <button className="primary-button" onClick={handleSaveNote} disabled={blocked} style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}>
                   💾 Save Note
                 </button>
               </div>
@@ -478,12 +457,14 @@ function App() {
                         <div className="deleted-note-actions">
                           <button
                             className="restore-button"
+                            disabled={blocked}
                             onClick={() => handleRestoreNote(note.id)}
                           >
                             ↩ Restore
                           </button>
                           <button
                             className="danger-button"
+                            disabled={blocked}
                             onClick={() => handlePermanentDelete(note.id)}
                           >
                             ✕ Delete Forever
@@ -531,6 +512,7 @@ function App() {
                 </div>
                 <select
                   className="settings-select"
+                  disabled={blocked}
                   value={settings.autoPurgeDays}
                   onChange={(e) => handleSettingsChange('autoPurgeDays', Number(e.target.value))}
                 >
@@ -552,7 +534,7 @@ function App() {
                 <button
                   className="clear-all-button"
                   onClick={handleClearAllTrash}
-                  disabled={deletedNotes.length === 0}
+                  disabled={blocked || deletedNotes.length === 0}
                 >
                   ⚠️ Clear All Trash
                 </button>

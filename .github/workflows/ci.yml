@@ -40,7 +40,8 @@ jobs:
         run: npm run lint
 
       - name: Run unit tests
-        run: npm run test --if-present
+        # Required regression tests must not silently disappear.
+        run: npm test
 
       - name: Build production bundle
         run: npm run build
