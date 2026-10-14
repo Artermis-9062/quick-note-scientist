@@ -1,3 +1,19 @@
+# Math-command learning stage
+
+This branch is an intentionally red, test-first learning checkpoint based on
+`origin/mvp-feat`. Start with [the lesson](learning/math/README.md), then fill
+the gaps in [the exercises](learning/math/exercises.js). The production math
+fix will follow your exercise attempt.
+
+- `npm test`: production math regression tests (expected failures before the fix).
+- `npm run test:coverage`: regression tests plus HTML/LCOV coverage.
+- `npm run test:learning`: your separate practice exercises.
+- `npm run test:e2e`: repeatable Playwright Chromium browser tests.
+- `npm run lint` and `npm run build`: source checks and production build.
+
+Coverage appears in `coverage/index.html`; browser results appear in
+`playwright-report/index.html`. Generated reports are ignored in Git.
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - mvp-feat
   workflow_dispatch:
 
 permissions:
@@ -33,27 +34,32 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browser
-        if: hashFiles('playwright.config.*') != ''
         run: npx playwright install --with-deps chromium
 
       - name: Lint
         run: npm run lint
 
-      - name: Run unit tests
-        run: npm run test --if-present
+      # Coverage also runs all required regression tests; do not silently skip them.
+      - name: Run unit tests and coverage
+        if: ${{ !cancelled() }}
+        run: npm run test:coverage
 
       - name: Build production bundle
+        if: ${{ !cancelled() }}
         run: npm run build
 
       - name: Run end-to-end tests
-        run: npm run test:e2e --if-present
+        if: ${{ !cancelled() }}
+        run: npm run test:e2e
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      # Upload reports even while regression tests intentionally fail during Stage 1.
+      - name: Upload test reports
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: math-test-reports
           path: |
+            coverage/
             playwright-report/
             test-results/
           if-no-files-found: ignore

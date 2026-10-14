@@ -45,3 +45,8 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Generated coverage and browser failure artifacts
+coverage/
+playwright-report/
+test-results/
