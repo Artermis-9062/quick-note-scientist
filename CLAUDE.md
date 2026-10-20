@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-# CLAUDE.md
-
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
@@ -73,29 +71,27 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## High-Level Architecture
 
-The application follows a modern, component-based pattern using React/TypeScript. The architecture is heavily dependent on a centralized state management pattern (e.g., Zustand or React Context) to govern the application's overall state, particularly the currently active view and the selected note.
+A math-friendly note-taking app built with React 19 (plain JSX, no TypeScript) and Vite. All application state and view rendering live in a single `App` component in `src/App.jsx`; there is no component layer, no centralized store, and no backend.
 
 **Key Architectural Concerns:**
 
-1.  **State Flow:** All major view transitions are managed by dispatching actions to the central store, which dictates which primary component (`AppLayout` renders based on this state).
-2.  **Composition:** Components are designed to be highly composable. Core structural elements (`AppLayout`, `SidebarNavigation`) receive state consumers/handlers as props rather than handling their own state, promoting reuse.
-3.  **Domain Separation:** Logic is separated into dedicated feature modules (e.g., `src/components/views/`) which consume the global state.
+1. **State Flow:** Plain React `useState` in `src/App.jsx` holds `view`, `notes`, `activeNoteId`, `deletedNotes`, `settings`, etc. View switching is a `view` string union: `'home' | 'editor' | 'notes' | 'deleted' | 'settings'`, rendered as conditional blocks inside `App`.
+2. **Editor:** A `<textarea>` plus a live Markdown/KaTeX preview (`react-markdown` + `remark-math` + `rehype-katex`). Custom `\start ... \end` math blocks are preprocessed to `$$...$$` before rendering.
+3. **Math Input:** `src/utils/mathTranslator.js` maps ~150 keywords (Greek letters, operators, arrows, etc.) to Unicode/LaTeX. `src/editor/keyboard.js` implements shortcuts: Ctrl+U/I sub/superscript, double-Tab to toggle math blocks, `frac`/`sqrt` expansion, brace-group navigation, correct caret handling via `src/utils/caretUtils.js`.
+4. **Persistence:** localStorage only (`scientist-notes`, `scientist-deleted-notes`, `scientist-settings`), with configurable trash auto-purge.
 
 ## Development Workflow & Commands
-
-The primary workflow involves developing features against the central state, building out components for the sidebar and main content area, and ensuring the state updates correctly trigger view changes.
 
 - **Build Command:** `npm run build`
 - **Linting:** `npm run lint`
 - **Testing:**
-  - Run all unit tests: `npm test`
-  - Run tests for a single component/file: `npm test -- src/components/SidebarNavigation/SidebarNavigation.tsx`
+  - Run unit tests (Vitest): `npm test`
+  - Run e2e tests (Playwright): `npm run test:e2e`
 
 ## Project Structure Guidance
 
-- **State:** State logic resides in `src/store/` (e.g., `useAppStateStore.ts`). Changes here cascade to all components.
-- **Layout:** The top-level structure is managed in `src/components/AppLayout/AppLayout.tsx`.
-- **Navigation:** Navigation logic is encapsulated in `src/components/SidebarNavigation/SidebarNavigation.tsx`.
-- **Views:** Specific screen implementations live in `src/components/views/`.
-
-Please leverage these pointers when analyzing the codebase to quickly grasp the intended data flow and component boundaries.
+- **App:** Everything lives in `src/App.jsx` (state, sidebar nav, and all views).
+- **Math translation:** `src/utils/mathTranslator.js` (`KEYWORDS`, `tokenize`, `translateAll`, `translateAtBoundary`, `toLatex`).
+- **Caret helpers:** `src/utils/caretUtils.js` (`mapCaret`, `isCaretInMathBlock`, `findMatchingEnd`).
+- **Keyboard behavior:** `src/editor/keyboard.js`.
+- **Tests:** `src/App.test.jsx` (Vitest), `e2e/editor.spec.js` (Playwright).

@@ -214,3 +214,15 @@ KaTeX.
 | LaTeX | `vec` | \vec | |
 | LaTeX | `bar` | \bar | |
 | LaTeX | `tilde` | \tilde | |
+
+## Editor shortcuts
+
+These shortcuts are triggered by keyboard bindings (not typed keywords). They
+insert formatting markers directly at the caret position.
+
+| Category | Shortcut | Renders as | Notes |
+|---|---|---|---|
+| Editor | `Ctrl+U` (Cmd+U on Mac) | _{} | Inserts subscript braces; caret placed between braces |
+| Editor | `Ctrl+I` (Cmd+I on Mac) | ^{} | Inserts superscript braces; caret placed between braces |
+| Editor | `\start` (auto-pair) | \end | Typing `\start` automatically appends ` \end` at end of note; caret placed between them |
+| Editor | `Tab` `Tab` (double, <500ms) | — | Inside a math block, double-Tab jumps caret to just after the matching `\end` |

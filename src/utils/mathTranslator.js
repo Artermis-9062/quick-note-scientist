@@ -143,30 +143,71 @@ export const KEYWORDS = {
   tilde: '\\tilde',
 };
 
+// Keywords that expand to multi-argument LaTeX commands (e.g., \frac{}{})
+// Value = number of brace pairs to insert
+export const MULTI_ARG_KEYWORDS = {
+  // Two arguments
+  frac: 2,
+  dfrac: 2,
+  tfrac: 2,
+  binom: 2,
+  // One argument
+  overline: 1,
+  underline: 1,
+  hat: 1,
+  vec: 1,
+  bar: 1,
+  tilde: 1,
+  sqrt: 1,
+};
+
 // Tokenizer: single-pass, character-class based. Keeps every character of the
 // input as part of some token (no drops) and emits each token with its kind so
 // the lookup below only consults KEYWORDS for word/operator tokens.
 const BLOCK_RE = /(\\start[\s\S]*?\\end)/g;
 
-function tokenize(s) {
+/**
+ * Tokenize a string into an array of tokens with position info.
+ * @param {string} s - Input string to tokenize
+ * @returns {Array<{text: string, kind: 'word'|'space'|'number'|'op'|'latexcmd', start: number, end: number}>}
+ */
+/**
+ * Tokenize a string into an array of tokens with position info.
+ * Exported for use by caretUtils.js.
+ * @param {string} s - Input string to tokenize
+ * @returns {Array<{text: string, kind: 'word'|'space'|'number'|'op'|'latexcmd', start: number, end: number}>}
+ */
+export function tokenize(s) {
   const out = [];
   let i = 0;
   while (i < s.length) {
     const c = s[i];
+    const start = i;
+    // LaTeX command: \word (e.g., \sqrt, \frac) - don't translate these
+    if (c === '\\') {
+      let j = i + 1;
+      while (j < s.length && /[a-zA-Z]/.test(s[j])) j++;
+      if (j > i + 1) {
+        out.push({ text: s.slice(i, j), kind: 'latexcmd', start, end: j });
+        i = j;
+        continue;
+      }
+      // Lone backslash - treat as operator
+    }
     if (/[a-zA-Z]/.test(c)) {
       let j = i;
       while (j < s.length && /[a-zA-Z0-9]/.test(s[j])) j++;
-      out.push({ text: s.slice(i, j), kind: 'word' });
+      out.push({ text: s.slice(i, j), kind: 'word', start, end: j });
       i = j;
     } else if (/\s/.test(c)) {
       let j = i;
       while (j < s.length && /\s/.test(s[j])) j++;
-      out.push({ text: s.slice(i, j), kind: 'space' });
+      out.push({ text: s.slice(i, j), kind: 'space', start, end: j });
       i = j;
     } else if (/[0-9]/.test(c)) {
       let j = i;
       while (j < s.length && /[0-9.]/.test(s[j])) j++;
-      out.push({ text: s.slice(i, j), kind: 'number' });
+      out.push({ text: s.slice(i, j), kind: 'number', start, end: j });
       i = j;
     } else {
       // Operator run: includes `_`, so `beta_0` tokenizes as
@@ -174,7 +215,7 @@ function tokenize(s) {
       // `_0` as one op is fine — it won't match a keyword and won't be lost.
       let j = i;
       while (j < s.length && !/[a-zA-Z0-9\s]/.test(s[j])) j++;
-      out.push({ text: s.slice(i, j), kind: 'op' });
+      out.push({ text: s.slice(i, j), kind: 'op', start, end: j });
       i = j;
     }
   }
@@ -185,12 +226,21 @@ function translateSegment(segment) {
   const trimmed = segment.slice(6, -4); // strip leading \start and trailing \end
   const tokens = tokenize(trimmed);
   const rebuilt = tokens
-    .map((t) => (KEYWORDS[t.text] !== undefined ? KEYWORDS[t.text] : t.text))
+    .map((t) => {
+      // Don't translate LaTeX commands (already in \command form)
+      if (t.kind === 'latexcmd') return t.text;
+      return KEYWORDS[t.text] !== undefined ? KEYWORDS[t.text] : t.text;
+    })
     .join('');
   return '\\start' + rebuilt + '\\end';
 }
 
-export function translateMath(input) {
+/**
+ * Translate ALL keywords in math blocks (used for save/preview paths).
+ * @param {string} input - Input text with \start...\end blocks
+ * @returns {string} Fully translated text
+ */
+export function translateAll(input) {
   if (!input) return input;
   const parts = input.split(BLOCK_RE);
   return parts
@@ -224,7 +274,11 @@ const LATEX_BLOCK_RE = /(\$\$[\s\S]*?\$\$)/g;
 function reverseSegment(inner) {
   const tokens = tokenize(inner);
   return tokens
-    .map((t) => (LATEX_KEYWORDS[t.text] !== undefined ? LATEX_KEYWORDS[t.text] : t.text))
+    .map((t) => {
+      // Don't convert LaTeX commands (already in \command form)
+      if (t.kind === 'latexcmd') return t.text;
+      return LATEX_KEYWORDS[t.text] !== undefined ? LATEX_KEYWORDS[t.text] : t.text;
+    })
     .join('');
 }
 
@@ -241,51 +295,5 @@ export function toLatex(input) {
     .join('');
 }
 
-// Map a caret offset in `original` to the equivalent offset in `translated`,
-// where the two strings differ only by keyword replacements inside math blocks.
-export function mapCaret(original, translated, caret) {
-  if (caret <= 0) return 0;
-  if (caret >= original.length) return translated.length;
-  const origParts = original.split(BLOCK_RE);
-  let origPos = 0;
-  let transPos = 0;
-  for (const origPart of origParts) {
-    const isBlock =
-      origPart.startsWith('\\start') && origPart.endsWith('\\end');
-    const transPart = isBlock ? translateSegment(origPart) : origPart;
-    const partEnd = origPos + origPart.length;
-    if (caret < partEnd) {
-      const localOffset = caret - origPos;
-      if (!isBlock) return transPos + localOffset;
-      const DELIM_LEN = 6; // len(\start)
-      const END_LEN = 4;   // len(\end)
-      const inner = origPart.slice(DELIM_LEN, -END_LEN);
-      const innerLen = inner.length;
-      // Caret in the trailing `\end` is preserved 1:1 (those chars don't change).
-      if (localOffset >= DELIM_LEN + innerLen) {
-        const endOffset = localOffset - DELIM_LEN - innerLen;
-        return transPos + DELIM_LEN + (transPart.length - DELIM_LEN - END_LEN) + endOffset;
-      }
-      // Walk token-by-token inside the block to find the translated position.
-      const tokens = tokenize(inner);
-      let innerPos = 0;
-      let innerTransPos = 0;
-      const caretInInner = localOffset - DELIM_LEN;
-      for (const tok of tokens) {
-        const tokEnd = innerPos + tok.text.length;
-        if (caretInInner < tokEnd) {
-          const offsetInTok = caretInInner - innerPos;
-          const replacement = KEYWORDS[tok.text] ?? tok.text;
-          const offsetInRep = Math.min(offsetInTok, replacement.length);
-          return transPos + DELIM_LEN + innerTransPos + offsetInRep;
-        }
-        innerPos = tokEnd;
-        innerTransPos += (KEYWORDS[tok.text] ?? tok.text).length;
-      }
-      return transPos + transPart.length;
-    }
-    origPos = partEnd;
-    transPos += transPart.length;
-  }
-  return translated.length;
-}
+// Backward compatibility alias
+export { translateAll as translateMath };

@@ -1,10 +1,15 @@
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import './index.css';
-import { translateMath, toLatex, mapCaret } from './utils/mathTranslator.js';
+// Translator: translateAll/toLatex for the rendered preview (editor keeps raw text)
+import { translateAll, toLatex } from './utils/mathTranslator.js';
+// Caret utilities: math-block detection for the status badge
+import { isCaretInMathBlock } from './utils/caretUtils.js';
+// Editor keyboard shortcuts: Ctrl+U/Ctrl+I, double-Tab math block, keyword expansion
+import { setupEditorKeyboard } from './editor/keyboard.js';
 
 // Preprocessor for custom shortcut
 const preprocessMarkdown = (text) => {
@@ -12,6 +17,13 @@ const preprocessMarkdown = (text) => {
   let processed = text.replace(/[/\\]start/g, '$$$$');
   processed = processed.replace(/[/\\]end/g, '$$$$');
   return processed;
+  // The regex escapes are intentional for matching both / and \ prefixes
+};
+
+// Check if content has math blocks (\start...\end)
+const hasMathBlocks = (text) => {
+  if (!text) return false;
+  return /\\start[\s\S]*?\\end/.test(text);
 };
 
 // Time-ago helper — converts a timestamp to a human-readable relative time
@@ -74,6 +86,7 @@ function App() {
   const [activeNoteId, setActiveNoteId] = useState(null);
   const [deletedNotes, setDeletedNotes] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [isInMathMode, setIsInMathMode] = useState(false);
 
   // Load notes and settings from local storage on mount
   useEffect(() => {
@@ -109,26 +122,25 @@ function App() {
     }
   }, [deletedNotes, settings.autoPurgeDays]);
 
-  // Caret tracking across in-place translations from the symbol translator.
-  // `pendingCaret` holds the caret offset in the *original* (pre-translation)
-  // string; the layout effect below maps it to the new offset and applies it.
-  const pendingCaretRef = useRef(null);
-  useLayoutEffect(() => {
-    if (pendingCaretRef.current == null) return;
-    const ta = editorRef.current;
-    if (!ta) return;
-    const { original, caret } = pendingCaretRef.current;
-    const mapped = mapCaret(original, noteContent, caret);
-    ta.setSelectionRange(mapped, mapped);
-    pendingCaretRef.current = null;
-  }, [noteContent]);
+  // Editor keyboard shortcuts: Ctrl+U (subscript), Ctrl+I (superscript),
+  // double-Tab math block, keyword expansion (frac, etc.), Enter/Backspace navigation
+  useEffect(() => {
+    if (view !== 'editor' || !editorRef.current) return;
+    const cleanup = setupEditorKeyboard(editorRef, setNoteContent, () => noteContent);
+    return cleanup;
+  }, [view]);
 
   const handleContentChange = (e) => {
-    const next = e.target.value;
-    const caret = e.target.selectionStart ?? next.length;
-    const translated = translateMath(next);
-    pendingCaretRef.current = { original: next, caret };
-    setNoteContent(translated);
+    const rawValue = e.target.value;
+    const caret = e.target.selectionStart ?? rawValue.length;
+    // Keep the textarea content raw — translation happens only in the preview.
+    setNoteContent(rawValue);
+    setIsInMathMode(isCaretInMathBlock(rawValue, caret));
+  };
+
+  const handleSelect = (e) => {
+    const caret = e.target.selectionStart ?? 0;
+    setIsInMathMode(isCaretInMathBlock(noteContent, caret));
   };
 
   // --- Settings Handlers ---
@@ -163,8 +175,8 @@ function App() {
     let updatedNotes;
     if (activeNoteId) {
       // Update existing note
-      updatedNotes = notes.map(n => 
-        n.id === activeNoteId ? { ...n, title: titleToSave, content: noteContent, updatedAt: getCurrentTime() } : n
+      updatedNotes = notes.map(n =>
+        n.id === activeNoteId ? { ...n, title: titleToSave, content: noteContent, updatedAt: Date.now() } : n
       );
     } else {
       // Create new note
@@ -300,7 +312,7 @@ function App() {
           <h1>Notes for Scientist</h1>
           <p className="subtitle">Your dedicated space for research and discovery.</p>
         </header>
-        
+
         {view === 'home' && (
           <div className="content-area">
             {notes.length === 0 ? (
@@ -377,7 +389,7 @@ function App() {
                           🗑️
                         </button>
                       </div>
-                      <div 
+                      <div
                         className="note-card"
                         onClick={() => handleOpenNote(note)}
                       >
@@ -424,22 +436,41 @@ function App() {
                   💾 Save Note
                 </button>
               </div>
-              <textarea
-                ref={editorRef}
-                className="markdown-input"
-                placeholder="Type your notes here... Use \start and \end for equations."
-                value={noteContent}
-                onChange={handleContentChange}
-              />
+              <div className="math-editor-wrapper">
+                <div className="math-editor-header">
+                  {isInMathMode && (
+                    <span className="math-mode-badge">
+                      <span className="math-indicator">∑</span> Math mode
+                    </span>
+                  )}
+                  <span className="math-hint">Tab Tab for math block • Ctrl+U subscript • Ctrl+I superscript</span>
+                </div>
+                <textarea
+                  ref={editorRef}
+                  className="markdown-input"
+                  placeholder="Type your notes here... Double-Tab for math block."
+                  value={noteContent}
+                  onChange={handleContentChange}
+                  onSelect={handleSelect}
+                />
+              </div>
             </div>
-            <div className="editor-pane preview-pane markdown-body">
-              {noteTitle && <h1 className="preview-title">{noteTitle}</h1>}
+            <div className="editor-pane preview-pane markdown-body" style={{ display: 'flex', flexDirection: 'column' }}>
+              <div className="preview-header">
+                {noteTitle && <h1 className="preview-title">{noteTitle}</h1>}
+                {hasMathBlocks(noteContent) && (
+                  <span className="math-mode-badge preview-badge">
+                    <span className="math-indicator">∑</span> Math rendered
+                  </span>
+                )}
+              </div>
               {noteContent ? (
                 <ReactMarkdown
                   remarkPlugins={[remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                 >
-                  {toLatex(preprocessMarkdown(noteContent))}
+                  {/* translateAll fully translates all keywords, then toLatex converts Unicode to LaTeX for KaTeX */}
+                  {toLatex(preprocessMarkdown(translateAll(noteContent)))}
                 </ReactMarkdown>
               ) : (
                 !noteTitle && <div className="preview-placeholder">Live preview will appear here...</div>
@@ -507,7 +538,7 @@ function App() {
                 Trash & Auto-Delete
               </h3>
               <p className="settings-description">
-                Configure how long deleted notes remain in the trash before being permanently removed. 
+                Configure how long deleted notes remain in the trash before being permanently removed.
                 Once auto-deleted, notes cannot be recovered.
               </p>
 
