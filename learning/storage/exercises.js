@@ -1,10 +1,23 @@
 /** Exercise 1: return true only for a complete, valid note. No storage changes. */
 export function validateNote(note, trashed = false) {
-  // TODO: Check that note is an object, then validate id, title, content, and updatedAt.
-  // TODO: When trashed is true, require a finite deletedAt timestamp too.
-  void note;
-  void trashed;
-  return false; // GAP: replace this placeholder with your validation expression.
+  if (note === null || typeof note !== 'object') {
+    return false;
+  }
+
+  const hasValidId = typeof note.id === 'string' && note.id.trim().length > 0;
+  const hasValidTitle = typeof note.title === 'string';
+  const hasValidContent = typeof note.content === 'string';
+  const hasValidUpdatedAt = Number.isFinite(note.updatedAt);
+
+  if (!hasValidId || !hasValidTitle || !hasValidContent || !hasValidUpdatedAt) {
+    return false;
+  }
+
+  if (trashed && !Number.isFinite(note.deletedAt)) {
+    return false;
+  }
+
+  return true;
 }
 
 /** Exercise 2: return a new snapshot with one note moved, without mutating the input. */
